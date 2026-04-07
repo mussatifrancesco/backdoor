@@ -1,4 +1,0 @@
-server:
-  host: 0.0.0.0
-  maxc: 5
-  port: 7771
