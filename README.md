@@ -54,6 +54,10 @@ Nel `client.pyw` correggi l'indirizzo dell'attaccante
 Se vuoi insiettare tramite usb hai due possibilità, usa arduino leonardo e carica il file ino con le dovute librerie
 Altrimenti usa il raspberry pico e carica sulla sua cartella i file di configurazione, rimuovi tutto con nuke se serve.
 
-# Disclaimer
-## Questo programma è a solo scopo educativo ed è stato creato a fini didattici, l'utilizzo di questo strumento può comportare ripercussioni legali se usato in modo illecito.
+#⚠️ Disclaimer & Ethical Use
+
+Questo progetto è stato sviluppato esclusivamente a scopo educativo e di ricerca nell'ambito della sicurezza informatica. L'obiettivo è analizzare i vettori di attacco HID (BadUSB) e le architetture di rete C2 per migliorare le strategie di difesa.
+- L'uso di questo strumento su sistemi o reti senza l'esplicita autorizzazione del proprietario è illegale.
+- L'autore non si assume alcuna responsabilità per eventuali danni o conseguenze legali derivanti dall'uso improprio di questo software.
+- Utilizzando questo repository, accetti di operare nel rispetto delle leggi vigenti e dei principi dell'Ethical Hacking.
 
