@@ -38,7 +38,7 @@ Un framework avanzato di **Command & Control (C2)** progettato per la gestione r
 ### 1. Installazione Dipendenze
 Il framework richiede alcune librerie esterne. Installa tutto con il comando:
 ```bash
-pip install -r requirements.txt
+pip install .
 ```
 ### 2. Modifica Configurazione
 Imposta il tuo ip(attaccante) e la tua porta in ascolto nel file yaml `conf/configuration.yaml`
