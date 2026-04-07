@@ -45,13 +45,13 @@ Imposta il tuo ip(attaccante) e la tua porta in ascolto nel file yaml `conf/conf
 
 ### Client Target
 ### 1. Modifica injection
-Prima di iniettare modifica il comando ps1 in `badusb/` o in `injection.ps1` in modo da raggiungere il tuo file eseguibile e scaricarlo
+Prima di iniettare modifica il comando ps1 in `badusb/` o in `injection.ps1` in modo da raggiungere il tuo file eseguibile e scaricarlo.
 
 ### 2. Modifica ip e porta
-Nel `client.pyw` correggi l'indirizzo dell'attaccante
+Nel `client.pyw` correggi l'indirizzo dell'attaccante.
 
 ### 3. Installazione badusb
-Se vuoi insiettare tramite usb hai due possibilità, usa arduino leonardo e carica il file ino con le dovute librerie
+Se vuoi insiettare tramite usb hai due possibilità, usa arduino leonardo e carica il file ino con le dovute librerie.
 Altrimenti usa il raspberry pico e carica sulla sua cartella i file di configurazione, rimuovi tutto con nuke se serve.
 
 # ⚠️ Disclaimer & Ethical Use
