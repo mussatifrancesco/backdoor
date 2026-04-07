@@ -6,7 +6,7 @@ import os
 class C2Client:
     """Gestisce la connessione e l'esecuzione dei comandi sul lato client."""
     
-    def __init__(self, host="127.0.0.1", port=8081):
+    def __init__(self, host="127.0.0.1", port=7771):
         self.host = host
         self.port = port
         self.socket = None
